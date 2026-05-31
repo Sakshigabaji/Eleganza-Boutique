@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
 
 const CartContext = createContext<any>(null);
 
@@ -10,79 +10,271 @@ export const CartProvider = ({ children }: any) => {
   const [user, setUser] = useState<any>(null);
   const [myDesigns, setMyDesigns] = useState<any[]>([]);
   const [cartMessage, setCartMessage] = useState("");
-  
-  // New state for Buyer Profile compatibility
   const [purchasedItems, setPurchasedItems] = useState<any[]>([]);
 
-  const addToCart = (product: any) => {
-    setCart((prev: any[]) => {
-      const existing = prev.find((item: any) => item.id === product.id);
+  // ─── Load cart & wishlist from MongoDB when userId exists ────────────────
+  // Fix: Navbar / cart badges were not updating reliably because cart/wishlist
+  // were only loaded when `user` state changed. Instead, load on mount and
+  // whenever localStorage.userId becomes available.
+  useEffect(() => {
+    const loadIfPossible = async () => {
+      const userIdFromStorage = localStorage.getItem("userId");
+      if (!userIdFromStorage) return;
+      await Promise.all([
+        loadCartFromDB(userIdFromStorage),
+        loadWishlistFromDB(userIdFromStorage),
+      ]);
+    };
 
-      if (existing) {
-        return prev.map((item: any) =>
-          item.id === product.id
-            ? { ...item, quantity: (item.quantity || 1) + 1 }
-            : item
-        );
+    // Initial load
+    void loadIfPossible();
+
+    // If userId changes (e.g. login in another tab / after redirect), update.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "userId") {
+        void loadIfPossible();
       }
-      return [...prev, { ...product, quantity: 1 }];
-    });
+    };
+
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      window.removeEventListener("storage", onStorage);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadCartFromDB = async (userId: string) => {
+
+    try {
+      const res = await fetch(`/api/cart?userId=${userId}`);
+      if (!res.ok) return;
+      const items = await res.json();
+      // Map DB items to local format
+      const mapped = items.map((item: any) => ({
+        id: item.productId,
+        _cartId: item._id,
+        name: item.name,
+        price: item.price,
+        image: item.image,
+        quantity: item.quantity,
+      }));
+      setCart(mapped);
+    } catch (err) {
+      console.error("Failed to load cart:", err);
+    }
+  };
+
+  const loadWishlistFromDB = async (userId: string) => {
+    try {
+      const res = await fetch(`/api/wishlist?userId=${userId}`);
+      if (!res.ok) return;
+      const items = await res.json();
+      const mapped = items.map((item: any) => ({
+        id: item.productId,
+        _wishlistId: item._id,
+        name: item.name,
+        price: item.price,
+        image: item.image,
+      }));
+      setWishlist(mapped);
+    } catch (err) {
+      console.error("Failed to load wishlist:", err);
+    }
+  };
+
+  // ─── Add to Cart ──────────────────────────────────────────────────────────
+  const addToCart = async (product: any) => {
+    const userId = localStorage.getItem("userId");
+
+    // Save to MongoDB if logged in
+    if (userId) {
+      try {
+        await fetch("/api/cart", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            productId: product.id,
+            name: product.name,
+            price: product.price,
+            image: product.image,
+          }),
+        });
+        // Reload from DB to get fresh data
+        await loadCartFromDB(userId);
+      } catch (err) {
+        console.error("Failed to add to cart:", err);
+      }
+    } else {
+      // Not logged in — save to local state only
+      setCart((prev: any[]) => {
+        const existing = prev.find((item: any) => item.id === product.id);
+        if (existing) {
+          return prev.map((item: any) =>
+            item.id === product.id
+              ? { ...item, quantity: (item.quantity || 1) + 1 }
+              : item
+          );
+        }
+        return [...prev, { ...product, quantity: 1 }];
+      });
+    }
 
     setCartMessage(`${product.name} added to cart`);
     setTimeout(() => setCartMessage(""), 2000);
   };
 
-  const increaseQty = (id: any) => {
-    setCart((prev: any[]) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, quantity: (item.quantity || 1) + 1 } : item
-      )
-    );
-  };
+  // ─── Increase Quantity ────────────────────────────────────────────────────
+  const increaseQty = async (id: any) => {
+    const userId = localStorage.getItem("userId");
 
-  const decreaseQty = (id: any) => {
-    setCart((prev: any[]) => {
-      const item = prev.find((i) => i.id === id);
-      if (!item) return prev;
-      if ((item.quantity || 1) <= 1) {
-        return prev.filter((i) => i.id !== id);
+    if (userId) {
+      try {
+        await fetch("/api/cart", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, productId: id, action: "increase" }),
+        });
+        await loadCartFromDB(userId);
+      } catch (err) {
+        console.error("Failed to increase qty:", err);
       }
-      return prev.map((i) =>
-        i.id === id ? { ...i, quantity: (i.quantity || 1) - 1 } : i
+    } else {
+      setCart((prev: any[]) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, quantity: (item.quantity || 1) + 1 } : item
+        )
       );
-    });
+    }
   };
 
-  const addToWishlist = (product: any) => {
-    setWishlist((prev: any) => {
-      const exists = prev.find((item: any) => item.id === product.id);
-      if (exists) return prev.filter((item: any) => item.id !== product.id); 
-      return [...prev, product];
-    });
+  // ─── Decrease Quantity ────────────────────────────────────────────────────
+  const decreaseQty = async (id: any) => {
+    const userId = localStorage.getItem("userId");
+
+    if (userId) {
+      try {
+        await fetch("/api/cart", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId, productId: id, action: "decrease" }),
+        });
+        await loadCartFromDB(userId);
+      } catch (err) {
+        console.error("Failed to decrease qty:", err);
+      }
+    } else {
+      setCart((prev: any[]) => {
+        const item = prev.find((i) => i.id === id);
+        if (!item) return prev;
+        if ((item.quantity || 1) <= 1) return prev.filter((i) => i.id !== id);
+        return prev.map((i) =>
+          i.id === id ? { ...i, quantity: (i.quantity || 1) - 1 } : i
+        );
+      });
+    }
   };
 
-  const removeFromWishlist = (id: any) => {
-    setWishlist((prev) => prev.filter((item) => item.id !== id));
+  // ─── Add to Wishlist ──────────────────────────────────────────────────────
+  const addToWishlist = async (product: any) => {
+    const userId = localStorage.getItem("userId");
+    const alreadyInWishlist = wishlist.find((item: any) => item.id === product.id);
+
+    if (userId) {
+      try {
+        if (alreadyInWishlist) {
+          // Remove from wishlist
+          await fetch("/api/wishlist", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wishlistItemId: alreadyInWishlist._wishlistId }),
+          });
+        } else {
+          // Add to wishlist
+          await fetch("/api/wishlist", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              userId,
+              productId: product.id,
+              name: product.name,
+              price: product.price,
+              image: product.image,
+            }),
+          });
+        }
+        await loadWishlistFromDB(userId);
+      } catch (err) {
+        console.error("Failed to update wishlist:", err);
+      }
+    } else {
+      // Not logged in — local state only
+      setWishlist((prev: any) => {
+        const exists = prev.find((item: any) => item.id === product.id);
+        if (exists) return prev.filter((item: any) => item.id !== product.id);
+        return [...prev, product];
+      });
+    }
   };
 
+  // ─── Remove from Wishlist ─────────────────────────────────────────────────
+  const removeFromWishlist = async (id: any) => {
+    const userId = localStorage.getItem("userId");
+    const item = wishlist.find((i: any) => i.id === id);
+
+    if (userId && item?._wishlistId) {
+      try {
+        await fetch("/api/wishlist", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wishlistItemId: item._wishlistId }),
+        });
+        await loadWishlistFromDB(userId);
+      } catch (err) {
+        console.error("Failed to remove from wishlist:", err);
+      }
+    } else {
+      setWishlist((prev) => prev.filter((item) => item.id !== id));
+    }
+  };
+
+  // ─── Designs ──────────────────────────────────────────────────────────────
   const addDesign = (design: any) => {
     setMyDesigns((prev) => [...prev, design]);
   };
 
-  // --- NEW CODE START ---
-  
-  // This fixes the "removeDesign is not a function" error
   const removeDesign = (id: any) => {
     setMyDesigns((prev) => prev.filter((design) => design.id !== id));
   };
 
-  // Optional: Function to simulate a purchase
-  const clearCartAndPurchase = () => {
+  // ─── Purchase ─────────────────────────────────────────────────────────────
+  const clearCartAndPurchase = async () => {
+    const userId = localStorage.getItem("userId");
     setPurchasedItems((prev) => [...prev, ...cart]);
+
+    if (userId) {
+      try {
+        await fetch("/api/cart/clear", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId }),
+        });
+      } catch (err) {
+        console.error("Failed to clear cart:", err);
+      }
+    }
     setCart([]);
   };
 
-  // --- NEW CODE END ---
+  // ─── Logout — clear local state ───────────────────────────────────────────
+  const logout = () => {
+    setUser(null);
+    setCart([]);
+    setWishlist([]);
+    localStorage.removeItem("userId");
+    localStorage.removeItem("userRole");
+  };
 
   return (
     <CartContext.Provider
@@ -94,14 +286,15 @@ export const CartProvider = ({ children }: any) => {
         addToCart,
         addToWishlist,
         addDesign,
-        removeDesign, // Exporting the new function
+        removeDesign,
         removeFromWishlist,
         increaseQty,
         decreaseQty,
         cartMessage,
         myDesigns,
-        purchasedItems, // Exporting for Buyer Profile
+        purchasedItems,
         clearCartAndPurchase,
+        logout, // ← new: use this on logout button
         cartCount: cart.reduce((acc, item) => acc + (item.quantity || 1), 0),
         wishlistCount: wishlist.length,
       }}

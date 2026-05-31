@@ -1,1 +1,5 @@
-# Task: Fix Error in Buyer Page (app/profile/buyer/page.tsx)\n\n## Steps:\n1. [x] **Add missing User import** from lucide-react ✓\n2. [x] **Fix purchasedItems**: Rename `cart` from context to `purchasedItems` (proxy for orders) ✓\n3. [x] **Edit and save** app/profile/buyer/page.tsx with fixes ✓\n4. [ ] **Test**: Run dev server, visit /profile/buyer, check console/no crashes.\n5. [ ] **Verify** wishlistCount, user display (requires login).\n6. [x] [Complete] Errors fixed: missing import/runtime crash resolved, data sourced from cart.
+- [x] Analyze CartContext + wishlist/cart flow end-to-end
+- [x] Fix CartContext to load cart/wishlist from MongoDB on mount when localStorage.userId exists (not only when `user` changes)
+- [ ] Ensure Navbar counts update reliably (manual test)
+- [ ] Run Next.js lint/build checks
+
