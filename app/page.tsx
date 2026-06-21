@@ -68,7 +68,7 @@ const ProductCard = ({ product }: { product: any }) => {
             }}
             className="w-full flex items-center justify-center gap-3 py-3 rounded-full text-xs font-bold uppercase tracking-widest text-black bg-[#C9A227] hover:bg-[#f5d76e] transition-all duration-300 shadow-md active:scale-95"
           >
-            <ShoppingCart size={14} /> Add To Collection
+            <ShoppingCart size={14} /> Add To Cart
           </button>
         </div>
       </div>
