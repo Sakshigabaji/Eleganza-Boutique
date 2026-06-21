@@ -13,7 +13,7 @@ export default function CartPage() {
   const { cart, increaseQty, decreaseQty } = useCart();
   const router = useRouter();
 
-  const totalPrice = cart.reduce(
+  const totalPrice = c  art.reduce(
     (sum: number, item: any) =>
       sum +
       Number(String(item.price).replace(/[^0-9]/g, "") || 0) *
